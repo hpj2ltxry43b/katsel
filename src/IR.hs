@@ -5,13 +5,22 @@ module IR
     , VIdx
     , upcast_dsidx
     , upcast_vidx
+    , resolve_dsidx
+    , resolve_vidx
+
+    , ds_interner
+    , v_interner
 
     , DeclSymbol
     , Module
     , Type(..)
 
+    , Signedness(..)
+
     , Value
     , ConstFunctionPointer
+
+    , type_of
 
     , Function
     ) where

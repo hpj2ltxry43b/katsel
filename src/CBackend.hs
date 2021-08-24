@@ -9,11 +9,13 @@ import Interner
 
 import Data.List (intercalate)
 
-lower_mod_to_c :: IR.IRCtx -> IR.Module -> String
-lower_mod_to_c irctx root =
-    let (dses, vals) = IR.all_entities_in_mod irctx root
+import qualified Control.Monad.Reader as Reader (Reader)
 
-        include_section =
+lower_mod_to_c :: IR.Module -> Reader.Reader IR.IRCtx String
+lower_mod_to_c root =
+    _ <$> view_r IR.ds_interner >>= \ dses ->
+    _ <$> view_r IR.v_interner >>= \ vals ->
+    let include_section =
             "// includes:\n" ++
             concatMap (("#include "++) . (++"\n"))
                 [ "<stdint.h>"
@@ -21,16 +23,16 @@ lower_mod_to_c irctx root =
             "\n"
 
         (dsdecl_section, dsdef_section, vdecl_section, vdef_section) =
-            ( add_comments "declaration" "declsymbol" dses Mangle.mangle_dsid ds_decls
-            , add_comments "definition" "declsymbol" dses Mangle.mangle_dsid ds_defs
-            , add_comments "declaration" "value" vals Mangle.mangle_vid v_decls
-            , add_comments "definition" "value" vals Mangle.mangle_vid v_defs
+            ( add_comments "declaration" "declsymbol" dses Mangle.mangle_dsidx ds_decls
+            , add_comments "definition" "declsymbol" dses Mangle.mangle_dsidx ds_defs
+            , add_comments "declaration" "value" vals Mangle.mangle_vidx v_decls
+            , add_comments "definition" "value" vals Mangle.mangle_vidx v_defs
             )
             where
                 apply_lower_fun mangle_fun lowering_fun (item_path, item) = lowering_fun irctx (mangle_fun item_path) item
 
-                (ds_decls, ds_defs) = unzip $ map (apply_lower_fun Mangle.mangle_dsid lower_ds) dses
-                (v_decls, v_defs) = unzip $ map (apply_lower_fun Mangle.mangle_vid lower_v) vals
+                (ds_decls, ds_defs) = unzip $ map (apply_lower_fun Mangle.mangle_dsidx lower_ds) dses
+                (v_decls, v_defs) = unzip $ map (apply_lower_fun Mangle.mangle_vidx lower_v) vals
 
                 add_comments action thing_type thing_list mangle_fun lowered =
                     group_comment action thing_type ++ concat (zipWith add_single_comment thing_list lowered)
@@ -66,7 +68,7 @@ lower_mod_to_c irctx root =
         , vdef_irctx_section
         ]
 
-type LoweringFun entity = IR.IRCtx -> Mangle.MangledName -> entity -> (String, String)
+type LoweringFun entity = Mangle.MangledName -> entity -> Reader.Reader IR.IRCtx (String, String)
 
 not_necessary :: String
 not_necessary = "// not necessary\n"
@@ -74,14 +76,13 @@ not_necessary' :: (String, String)
 not_necessary' = (not_necessary, not_necessary)
 
 -- helpers {{{1
-filter_units_from_params :: IR.IRCtx -> [InternerIdx IR.Type] -> [InternerIdx IR.Type]
-filter_units_from_params irctx =
-    let is_unit = IR.apply_to_tyidx
-            (\case
-                IR.UnitType _ -> True
-                _ -> False
-            ) irctx
-    in filter (not . is_unit)
+filter_units_from_type_list :: [IR.DSIdx IR.Type] -> Reader.Reader IR.IRCtx [IR.DSIdx IR.Type]
+filter_units_from_type_list typelist =
+    let is_unit ty =
+            IR.resolve_dsidx ty >>= \case
+                IR.UnitType _ -> return True
+                _ -> return False
+    in filterM (not . is_unit) typelist
 -- c declarations {{{1
 data CDecl = CDecl String CDeclarator
 data CDeclarator
@@ -106,20 +107,23 @@ str_cdecl (CDecl res declarator) =
         str_declarator (FunctionDeclarator decl []) = str_declarator' decl ++ "(void)"
         str_declarator (FunctionDeclarator decl params) = str_declarator' decl ++ "(" ++ intercalate ", " (map str_cdecl params) ++ ")"
 -- converting types to c declarations {{{1
-type_to_cdecl' :: IR.IRCtx -> InternerIdx IR.Type -> Maybe Mangle.MangledName -> CDecl
-type_to_cdecl' irctx tyidx name = IR.apply_to_tyidx (\ ty -> type_to_cdecl irctx ty name) irctx tyidx
+type_to_cdecl' :: IR.DSIdx IR.Type -> Maybe Mangle.MangledName -> Reader.Reader IR.IRCtx CDecl
+type_to_cdecl' idx name =
+    resolve_dsidx idx >>= \ ty ->
+    type_to_cdecl ty name
 
-type_to_cdecl :: IR.IRCtx -> IR.Type -> Maybe Mangle.MangledName -> CDecl
-type_to_cdecl irctx ty name = CDecl basic_type declarator
+type_to_cdecl :: IR.Type -> Maybe Mangle.MangledName -> Reader.Reader IR.IRCtx CDecl
+type_to_cdecl ty name = CDecl basic_type declarator
     where
         name_declarator = maybe AbstractDeclarator IdentifierDeclarator name
         (basic_type, declarator) = add_to_declarator False irctx name_declarator ty
 
-add_to_declarator' :: Bool -> IR.IRCtx -> CDeclarator -> InternerIdx IR.Type -> (String, CDeclarator)
-add_to_declarator' uav irctx parent = IR.apply_to_tyidx (add_to_declarator uav irctx parent) irctx
+-- uav = unit_as_void
+add_to_declarator' :: Bool -> CDeclarator -> IR.DSIdx IR.Type -> Reader.Reader IR.IRCtx (String, CDeclarator)
+add_to_declarator' uav parent idx = (add_to_declarator uav parent <$>) . resolve_dsidx
 
-add_to_declarator :: Bool -> IR.IRCtx -> CDeclarator -> IR.Type -> (String, CDeclarator)
--- the given declarator is a value that is the same time as the type passed in
+add_to_declarator :: Bool -> CDeclarator -> IR.Type -> Reader.Reader IR.IRCtx (String, CDeclarator)
+-- the given declarator is a value that is the same type as the type passed in
 -- this function will add to the declarator the operation that can be performed on the type, and also return the basic type
 add_to_declarator _ _ parent (IR.FloatType _ 32) = ("float", parent)
 add_to_declarator _ _ parent (IR.FloatType _ 64) = ("double", parent)
@@ -149,9 +153,6 @@ add_to_declarator _ irctx parent (IR.FunctionPointerType _ ret params) =
 lower_ds :: LoweringFun IR.DeclSymbol
 lower_ds irctx mname = IR.apply_to_ds (error "cannot lower module in c backend") (lower_tyidx irctx mname)
 
-lower_tyidx :: LoweringFun (InternerIdx IR.Type)
-lower_tyidx irctx mname = IR.apply_to_tyidx (lower_ty irctx mname) irctx
-
 lower_ty :: LoweringFun IR.Type
 lower_ty _ _ (IR.UnitType _) = not_necessary'
 lower_ty irctx mname ty =
@@ -165,7 +166,7 @@ lower_ty irctx mname ty =
         IR.UnitType _ -> not_necessary
     )
 -- declsymbol phase of irctx {{{1
-dlower_irctx :: IR.IRCtx -> (String, String)
+dlower_irctx :: Reader.Reader IR.IRCtx (String, String)
 dlower_irctx _ = not_necessary'
 -- values {{{1
 lower_v :: LoweringFun IR.Value
@@ -179,7 +180,7 @@ lower_fun_ptr irctx mname fptr =
        , cdecl_strd ++ " = &" ++ Mangle.mangled_str (Mangle.mangle_fun (IR.get_function_idx fptr)) ++ ";\n"
        )
 -- value phase of irctx {{{1
-vlower_irctx :: IR.IRCtx -> (String, String)
+vlower_irctx :: Reader.Reader IR.IRCtx (String, String)
 vlower_irctx irctx =
     let function_interner = IR.get_function_interner irctx
 
