@@ -18,8 +18,6 @@ data TagName k
     = TN'DSIdx
     | TN'VIdx
     | TN'Name
-    | TN'Root
-    | TN'Next
     | TN'FunIdx
     | TN'Idx
     deriving (Eq, Ord, Enum, Bounded)
@@ -42,8 +40,6 @@ str_tag_name = (shortened Map.!) . full_str_name
         full_str_name TN'DSIdx = "dsidx"
         full_str_name TN'VIdx = "vidx"
         full_str_name TN'Name = "name"
-        full_str_name TN'Root = "root"
-        full_str_name TN'Next = "next"
         full_str_name TN'FunIdx = "funidx"
         full_str_name TN'Idx = "idx"
 
