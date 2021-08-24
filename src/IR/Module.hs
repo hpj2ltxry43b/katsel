@@ -42,4 +42,7 @@ instance DeclSpan IRCtx Module where
 instance Eq Module where
     _ == _ = True
 
+instance IdentifyDS Module where
+    identify_ds _ = DSTModule
+
 instance IsDeclSymbol IRCtx Module

@@ -44,4 +44,7 @@ instance Typed IRCtx (DSIdx Type) ConstFunctionPointer where
 instance Eq ConstFunctionPointer where
     (==) = (==) `on` get_function_idx
 
+instance IdentifyV ConstFunctionPointer where
+    identify_v _ = VTConstFunctionPointer
+
 instance IsValue IRCtx (DSIdx Type) ConstFunctionPointer

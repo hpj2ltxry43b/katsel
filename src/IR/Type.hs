@@ -52,6 +52,9 @@ instance DeclSpan IRCtx Type where
     decl_span UnitType = return Nothing
     decl_span (FunctionPointerType _ _) = return Nothing
 
+instance IdentifyDS Type where
+    identify_ds _ = DSTType
+
 instance IsDeclSymbol IRCtx Type
 
 match_signedness :: a -> a -> Signedness -> a

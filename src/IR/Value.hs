@@ -3,7 +3,11 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 
 module IR.Value
-    ( Value(..)
+    ( Value (..)
+
+    , ValueType (..)
+    , IdentifyV (..)
+
     , IsValue
     , v_cast
     ) where
@@ -13,7 +17,11 @@ import IR.Typed
 
 import Data.Typeable (Typeable, cast)
 
-class (Typeable v, Eq v, DeclSpan ctx v, Typed ctx tyr v) => IsValue ctx tyr v
+data ValueType = VTConstFunctionPointer
+class IdentifyV d where
+    identify_v :: d -> ValueType
+
+class (Typeable v, Eq v, DeclSpan ctx v, Typed ctx tyr v, IdentifyV v) => IsValue ctx tyr v
 data Value ctx tyr = forall v. IsValue ctx tyr v => Value v
 
 instance Eq (Value ctx tyr) where

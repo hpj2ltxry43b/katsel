@@ -3,6 +3,10 @@
 
 module IR.DeclSymbol
     ( DeclSymbol (..)
+
+    , DeclSymbolType (..)
+    , IdentifyDS (..)
+
     , IsDeclSymbol
     , ds_cast
     ) where
@@ -10,7 +14,11 @@ module IR.DeclSymbol
 import IR.DeclSpan
 import Data.Typeable (Typeable, cast)
 
-class (Typeable d, Eq d, DeclSpan ctx d) => IsDeclSymbol ctx d
+data DeclSymbolType = DSTModule | DSTType
+class IdentifyDS d where
+    identify_ds :: d -> DeclSymbolType
+
+class (Typeable d, Eq d, DeclSpan ctx d, IdentifyDS d) => IsDeclSymbol ctx d
 data DeclSymbol ctx = forall d. IsDeclSymbol ctx d => DeclSymbol d
 
 instance Eq (DeclSymbol ctx) where
