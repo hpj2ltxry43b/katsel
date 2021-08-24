@@ -5,11 +5,9 @@ module Mangle.TagName
 
     , str_tag_name
 
-    , tn'dsid
-    , tn'vid
+    , tn'dsidx
+    , tn'vidx
     , tn'name
-    , tn'root
-    , tn'next
     , tn'funidx
     , tn'idx
     ) where
@@ -17,8 +15,8 @@ module Mangle.TagName
 import qualified Data.Map as Map
 
 data TagName k
-    = TN'DSID
-    | TN'VID
+    = TN'DSIdx
+    | TN'VIdx
     | TN'Name
     | TN'Root
     | TN'Next
@@ -29,11 +27,9 @@ data TagName k
 data TagTagName
 data StrTagName
 
-tn'dsid, tn'vid, tn'root, tn'next, tn'funidx :: TagName TagTagName
-tn'dsid = TN'DSID
-tn'vid = TN'VID
-tn'root = TN'Root
-tn'next = TN'Next
+tn'dsidx, tn'vidx, tn'funidx :: TagName TagTagName
+tn'dsidx = TN'DSIdx
+tn'vidx = TN'VIdx
 tn'funidx = TN'FunIdx
 
 tn'name, tn'idx :: TagName StrTagName
@@ -43,8 +39,8 @@ tn'idx = TN'Idx
 str_tag_name :: TagName k -> String
 str_tag_name = (shortened Map.!) . full_str_name
     where
-        full_str_name TN'DSID = "dsid"
-        full_str_name TN'VID = "vid"
+        full_str_name TN'DSIdx = "dsidx"
+        full_str_name TN'VIdx = "vidx"
         full_str_name TN'Name = "name"
         full_str_name TN'Root = "root"
         full_str_name TN'Next = "next"

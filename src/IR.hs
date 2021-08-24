@@ -1,4 +1,20 @@
-module IR where
+module IR
+    ( IRCtx
+
+    , DSIdx
+    , VIdx
+    , upcast_dsidx
+    , upcast_vidx
+
+    , DeclSymbol
+    , Module
+    , Type(..)
+
+    , Value
+    , ConstFunctionPointer
+
+    , Function
+    ) where
 
 import IR.ChildList
 

@@ -37,7 +37,7 @@ encode_ch first ch
 -- tests {{{1
 tests :: Test
 tests =
-    let example_tag = Tag tn'root [example_child]
+    let example_tag = Tag tn'dsidx [example_child]
         example_child = StrTag tn'name "asdf"
     in DescribeModule "Mangle.Tag"
         [ DescribeFunction "str_tag"
@@ -52,10 +52,10 @@ tests =
         , DescribeFunction "str_tag'"
             [ ItCan "stringify a tag" $
                 let strd = str_tag' example_tag
-                    tn'root_strd = str_tag_name tn'root
+                    tn'dsidx_strd = str_tag_name tn'dsidx
                     child_strd = str_tag' example_child
 
-                    should_be = tn'root_strd ++ "1" ++ child_strd
+                    should_be = tn'dsidx_strd ++ "1" ++ child_strd
 
                 in pass_if $ strd == should_be
 
