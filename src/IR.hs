@@ -5,6 +5,8 @@
 module IR
     ( IRCtx
 
+    , build_ir
+
     , ds_interner
     , v_interner
     , function_interner
