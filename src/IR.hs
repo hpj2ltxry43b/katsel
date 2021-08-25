@@ -3,6 +3,7 @@ module IR
 
     , ds_interner
     , v_interner
+    , function_interner
 
     , DSIdx
     , VIdx
@@ -13,18 +14,23 @@ module IR
     , apply_to_ds
     , apply_to_v
 
-    , DeclSymbol
+    , DeclSymbol'
     , Module
     , Type(..)
 
     , Signedness(..)
+    , FloatSize(..)
+    , IntSize(..)
 
-    , Value
+    , Value'
     , ConstFunctionPointer
+    , get_function_idx
 
     , type_of
 
     , Function
+    , get_ret_type
+    , get_param_types
     ) where
 
 import IR.ChildList

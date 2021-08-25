@@ -72,6 +72,8 @@ function_interner :: Lens IRCtx (Interner Function)
 function_interner = Lens _function_interner (\ a b -> a { _function_interner = b })
 
 newtype DSIdx d = DSIdx { upcast_dsidx :: InternerIdx DeclSymbol' } deriving (Eq, Ord)
+instance Show (DSIdx d) where
+    show = show . upcast_dsidx
 
 downcast_dsidx :: IsDeclSymbol' d => InternerIdx DeclSymbol' -> Reader.Reader IRCtx (Maybe (DSIdx d))
 downcast_dsidx idx = Reader.reader $ \ irctx ->
@@ -95,6 +97,8 @@ resolve_dsidx (DSIdx iidx) = Reader.reader $ \ irctx ->
 
 
 newtype VIdx v = VIdx { upcast_vidx :: InternerIdx Value' } deriving (Eq, Ord)
+instance Show (VIdx d) where
+    show = show . upcast_vidx
 
 downcast_vidx :: IsValue' v => InternerIdx Value' -> Reader.Reader IRCtx (Maybe (VIdx v))
 downcast_vidx idx = Reader.reader $ \ irctx ->

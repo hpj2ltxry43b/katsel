@@ -3,7 +3,9 @@ module Mangle
     , mangled_str
 
     , mangle_dsidx
+    , mangle_ds_interner_idx
     , mangle_vidx
+    , mangle_v_interner_idx
     , mangle_fun
 
     , Mangle.tests
@@ -23,11 +25,17 @@ data MangledName = MangledName { mangled_str :: String }
 to_mn :: Tag -> MangledName
 to_mn = MangledName . str_tag
 
+mangle_ds_interner_idx :: InternerIdx IR.DeclSymbol' -> MangledName
+mangle_ds_interner_idx idx = to_mn $ Tag tn'dsidx [StrTag tn'idx (show idx)] -- TODO: do this better
+
 mangle_dsidx :: IR.DSIdx d -> MangledName
-mangle_dsidx dsidx = to_mn $ Tag tn'dsidx [StrTag tn'idx (show $ IR.upcast_dsidx dsidx)] -- TODO: do this better
+mangle_dsidx = mangle_ds_interner_idx . IR.upcast_dsidx
+
+mangle_v_interner_idx :: InternerIdx IR.Value' -> MangledName
+mangle_v_interner_idx idx = to_mn $ Tag tn'vidx [StrTag tn'idx (show idx)] -- TODO: do this better also
 
 mangle_vidx :: IR.VIdx v -> MangledName
-mangle_vidx vidx = to_mn $ Tag tn'vidx [StrTag tn'idx (show $ IR.upcast_vidx vidx)] -- TODO: do this better also
+mangle_vidx = mangle_v_interner_idx . IR.upcast_vidx
 
 mangle_fun :: InternerIdx IR.Function -> MangledName
 mangle_fun fidx = to_mn $ Tag tn'funidx [StrTag tn'idx (show fidx)]
