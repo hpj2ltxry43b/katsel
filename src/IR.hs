@@ -159,4 +159,6 @@ instance Message.ToDiagnostic (IRBuildError, IRCtx) where
                 [ MsgUnds.Underline sp MsgUnds.Primary [MsgUnds.Message MsgUnds.Error "cannot take pointer to non-lvalue"]
                 ]
             ]
-
+-- Lowerable class {{{1
+class Lowerable l p where
+    ddeclare, ddefine, vdeclare, vdefine :: l -> DSIdx Module -> DSIdx p -> State.State IRBuilder ()
