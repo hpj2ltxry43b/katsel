@@ -67,6 +67,7 @@ import Location
 import Interner
 import SimpleLens
 import StateAndLens
+import StateReader
 
 import Data.Maybe (catMaybes)
 
@@ -82,10 +83,10 @@ irb_errors :: Lens IRBuilder [IRBuildError]
 irb_errors = Lens (\ (IRBuilder _ e) -> e) (\ (IRBuilder i _) e -> IRBuilder i e)
 -- IRBuildError {{{1
 data IRBuildError
-    = DuplicateValue String Value' Value'
+    = DuplicateValue String (InternerIdx Value') (InternerIdx Value')
     -- | DuplicateLocal Function Local LValue TODO
     | Unimplemented String Span
-    | NotAType Span DeclSymbol'
+    | NotAType Span (InternerIdx DeclSymbol')
     | PathDoesntExist Span -- TODO: change to 'no entity called x in y'
     | InvalidAssign Span Span
     | TypeError TypeError
@@ -118,7 +119,10 @@ duplicate_msg entity_kind diag_name name old new =
 instance Message.ToDiagnostic (IRBuildError, IRCtx) where
     to_diagnostic (DuplicateValue name old new, irctx) =
         Reader.runReader
-            (duplicate_msg "value" "redecl-val" name old new)
+            (
+                view_r v_interner >>= \ interner ->
+                duplicate_msg "value" "redecl-val" name (resolve_interner_idx old interner) (resolve_interner_idx new interner)
+            )
             irctx
 
     -- TODO:
@@ -183,6 +187,64 @@ build_ir mod_ast@(Located mod_sp _) =
             lower_module vdefine mod_ast mod_idx >>
 
             return mod_idx
+-- helper functions {{{1
+(>>=?) :: Monad m => m (Maybe a) -> m b -> (a -> m b) -> m b
+(>>=?) m f c = m >>= maybe f c
+infixl 1 >>=?
+
+(>>=<>) :: Monad m => m (Either e r) -> (e -> m f) -> (r -> m f) -> m f
+(>>=<>) m onleft onright = m >>= either onleft onright
+infixl 1 >>=<>
+
+add_error :: IRBuildError -> State.State IRBuilder ()
+add_error err = over_s irb_errors (++[err])
+
+resolve_path' :: [String] -> DSIdx Module -> State.State IRCtx (Maybe (InternerIdx DeclSymbol'))
+resolve_path' segments root = resolve' segments (upcast_dsidx root)
+    where
+        resolve' [] start = return (Just start)
+        resolve' (current:next) start =
+            view_s ds_child_list >>= \ child_list ->
+            let m_child = get start current child_list
+            in case m_child of
+                Just child -> resolve' next child
+                Nothing -> return Nothing
+
+resolve_path_d :: AST.LDPath -> DSIdx Module -> State.State IRBuilder (Maybe (InternerIdx DeclSymbol'))
+resolve_path_d (Located path_sp (AST.DPath' located_segments)) root =
+    let segments = map unlocate located_segments
+    in modify_s' irb_irctx (resolve_path' segments root) >>= \case
+        Just resolved -> return $ Just resolved
+        Nothing ->
+            add_error (PathDoesntExist path_sp) >>
+            return Nothing
+
+resolve_path_v :: AST.LDPath -> DSIdx Module -> State.State IRBuilder (Maybe (InternerIdx Value'))
+resolve_path_v (Located path_sp (AST.DPath' located_segments)) root =
+    let segments = map unlocate located_segments
+        (first_segments, last_segment) = (init segments, last segments)
+    in modify_s' irb_irctx (resolve_path' first_segments root) >>= \case
+        Just resolved ->
+            view_s (irb_irctx `join_lenses` v_child_list) >>= \ child_list ->
+            let m_child = get resolved last_segment child_list
+            in case m_child of
+                Just child -> return $ Just child
+                Nothing ->
+                    add_error (PathDoesntExist path_sp) >>
+                    return Nothing
+
+        Nothing ->
+            add_error (PathDoesntExist path_sp) >>
+            return Nothing
+
+resolve_ty :: AST.LDType -> DSIdx Module -> State.State IRBuilder (Maybe (DSIdx Type))
+resolve_ty (Located path_sp (AST.DType'Path path)) root =
+    resolve_path_d path root >>=? return Nothing $ \ ds ->
+    to_state (read_r' irb_irctx (downcast_dsidx ds)) >>= \case
+        j@(Just _) -> return j
+        Nothing ->
+            add_error (NotAType path_sp ds) >>
+            return Nothing
 -- lowering modules {{{1
 lower_module :: (AST.LDDecl -> DSIdx Module -> DSIdx Module -> State.State IRBuilder ()) -> Located AST.DModule -> DSIdx Module -> State.State IRBuilder ()
 lower_module lower_decl (Located _ (AST.DModule' decls)) mod_idx = mapM_ (\ decl -> lower_decl decl mod_idx mod_idx) decls
@@ -197,3 +259,40 @@ instance Lowerable AST.LDDecl p where
     vdefine (Located _ (AST.DDecl'Fun sf)) = vdefine sf
 -- lowering functions {{{1
 instance Lowerable AST.LSFunDecl p where
+    -- functions do not lower to anything during the declaration phases
+    ddeclare _ _ _ = return ()
+    ddefine _ _ _ = return ()
+
+    vdeclare (Located fun_sp (AST.SFunDecl' mretty (Located _ name) params _)) root parent =
+        case mretty of
+            Just retty -> resolve_ty retty root
+            Nothing -> Just <$> modify_s' irb_irctx (get_ds UnitType)
+        >>=? return () $ \ retty' ->
+        let make_param (Located sp (AST.DParam'Normal ty_ast _)) =
+                resolve_ty ty_ast root >>=? return Nothing $ \ ty ->
+                return $ Just (ty, sp)
+        in sequence <$> mapM make_param params >>=? return () $ \ param_tys ->
+        let fun = new_function retty' param_tys fun_sp
+        in modify_s (irb_irctx `join_lenses` function_interner) (get_from_interner fun) >>= \ fun_idx ->
+        modify_s' irb_irctx (new_function_pointer fun_idx) >>= \ fptr ->
+        upcast_vidx <$> modify_s' irb_irctx (get_v fptr) >>= \ fptr_val ->
+        view_s (irb_irctx `join_lenses` v_child_list) >>= \ child_list ->
+        case add_noreplace (upcast_dsidx parent) name fptr_val child_list of
+            Left other_value ->
+                add_error (DuplicateValue name other_value fptr_val) >>
+                return ()
+            Right added ->
+                put_s (irb_irctx `join_lenses` v_child_list) added >>
+                return ()
+
+    vdefine (Located _ sf@(AST.SFunDecl' _ (Located _ name) _ _)) root parent =
+        get (upcast_dsidx parent) name <$> view_s (irb_irctx `join_lenses` v_child_list) >>=? (return ()) $ \ val ->
+        to_state (read_r' irb_irctx $ downcast_vidx val) >>= \case
+            -- silently ignore becuase the only way this can happen is if there is another global declaration
+            -- that made a value of the same name that is not a function, which should already be reported as a duplicate value error
+            Nothing -> return ()
+
+            Just old_fun ->
+                let x :: VIdx ConstFunctionPointer
+                    x = old_fun
+                in lower_fun_body sf root old_fun parent

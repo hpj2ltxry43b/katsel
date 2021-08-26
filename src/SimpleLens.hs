@@ -3,6 +3,7 @@ module SimpleLens
 
     , view
     , over
+    , put
     , modify
 
     , join_lenses
@@ -18,6 +19,9 @@ over (Lens getter setter) f a =
     let b = getter a
         b' = f b
     in setter a b'
+
+put :: Lens a b -> b -> a -> a
+put lens v = over lens (const v)
 
 modify :: Lens a b -> (b -> (c, b)) -> a -> (c, a)
 modify (Lens getter setter) f a =

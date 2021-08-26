@@ -2,6 +2,7 @@ module StateAndLens
     ( view_s
     , view_r
     , over_s
+    , put_s
     , modify_s
     , modify_s'
     , read_r
@@ -21,6 +22,9 @@ view_r = Reader.reader . view
 
 over_s :: Lens a b -> (b -> b) -> State.State a ()
 over_s lens f = State.state $ \ a -> ((), over lens f a)
+
+put_s :: Lens a b -> b -> State.State a ()
+put_s lens v = over_s lens (const v)
 
 modify_s :: Lens a b -> (b -> (c, b)) -> State.State a c
 modify_s lens f = State.state $ modify lens f
