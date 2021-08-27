@@ -7,6 +7,7 @@ module Pool
     , pool_idxs
     , add_to_pool
     , get_from_pool
+    , search_in_pool
     , replace_in_pool
 
     , tests
@@ -14,8 +15,10 @@ module Pool
 
 import Test
 
+import Data.List (elemIndex)
+
 newtype Pool a = Pool [a]
-newtype PoolIdx a = PoolIdx Int deriving Eq
+newtype PoolIdx a = PoolIdx Int deriving (Eq, Ord)
 
 instance Show (PoolIdx a) where
     show (PoolIdx i) = show i
@@ -37,6 +40,9 @@ add_to_pool item (Pool items) = (PoolIdx $ length items, Pool $ items ++ [item])
 
 get_from_pool :: PoolIdx a -> Pool a -> a
 get_from_pool (PoolIdx idx) (Pool items) = items !! idx
+
+search_in_pool :: Eq a => a -> Pool a -> Maybe (PoolIdx a)
+search_in_pool item (Pool items) = PoolIdx <$> elemIndex item items
 
 replace_in_pool :: a -> PoolIdx a -> Pool a -> Pool a
 replace_in_pool item (PoolIdx idx) (Pool items) =

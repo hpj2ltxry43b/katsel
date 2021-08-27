@@ -26,11 +26,11 @@ data Module = Module Span
 
 new_module :: Span -> State.State IRCtx (DSIdx Module)
 new_module sp =
-    get_ds (Module sp) >>= \ mod_idx ->
+    add_ds (Module sp) >>= \ mod_idx ->
     sequence
         (map
         (\ (name, ty) ->
-            get_ds ty >>= \ ty_dsidx ->
+            search_ds ty >>= \ ty_dsidx ->
             over_s ds_child_list (add_replace (upcast_dsidx mod_idx) name (upcast_dsidx ty_dsidx))
             )
         builtin_types) >>

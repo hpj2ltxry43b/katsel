@@ -63,7 +63,7 @@ import IR.Typed
 
 import Location
 
-import Interner
+import Pool
 
 import qualified Message
 import qualified Message.Underlines as MsgUnds
@@ -107,7 +107,7 @@ data LValue
     = LVRegister RegisterIdx
     deriving Eq
 data FValue
-    = FVGlobalValue (InternerIdx Value')
+    = FVGlobalValue (PoolIdx Value')
     | FVNLVRegister RegisterIdx
     | FVLValue LValue
     | FVConstInt Integer (DSIdx Type)
@@ -139,7 +139,7 @@ instance Typed IRCtx (DSIdx Type) (Function, LValue) where
     type_of (f, LVRegister reg) = type_of $ get_register f reg
 
 instance Typed IRCtx (DSIdx Type) (Function, FValue) where
-    type_of (_, FVGlobalValue vidx) = view_r v_interner >>= type_of . resolve_interner_idx vidx
+    type_of (_, FVGlobalValue vidx) = view_r v_pool >>= type_of . get_from_pool vidx
     type_of (fun, FVNLVRegister regidx) = type_of $ get_register fun regidx
     type_of (fun, FVLValue lv) = type_of (fun, lv)
     type_of (_, FVConstInt _ ty) = return ty
@@ -244,7 +244,7 @@ make_copy fun (Located lvsp lv) lv_name (Located fvsp fv) fv_name =
     to_state (type_of (fun, fv)) >>= \ fvty ->
     if lvty == fvty
          then
-            get_ds UnitType >>= \ unit_ty ->
+             search_ds UnitType >>= \ unit_ty ->
              return $ Right $ Copy lv fv unit_ty
          else return $ Left $ TypeError
                      ( ThingIs fv_name fvsp fvty NoReason )
@@ -262,7 +262,7 @@ make_br_goto = BrGoto
 make_br_cond :: Function -> Located FValue -> BlockIdx -> BlockIdx -> State.State IRCtx (Either TypeError Br)
 make_br_cond fun (Located condsp cond) t f =
     to_state (type_of (fun, cond)) >>= \ cond_ty ->
-    get_ds BoolType >>= \ bool_ty ->
+    search_ds BoolType >>= \ bool_ty ->
     if cond_ty == bool_ty
           then return $ Right $ BrCond cond t f
           else return $ Left $ TypeError
@@ -285,10 +285,10 @@ add_basic_block name fun =
         new_block_idx = BlockIdx $ length blocks
         new_block = BasicBlock name [] Nothing
 add_instruction :: Instruction -> BlockIdx -> Function -> (InstructionIdx, Function)
-add_instruction instr (BlockIdx block_idx) fun = (instr_idx, fun { get_instruction_pool = new_pool, get_blocks = new_blocks })
+add_instruction instr (BlockIdx block_idx) fun = (instr_idx, fun { get_instruction_pool = instruction_pool', get_blocks = new_blocks })
     where
-        new_pool = get_instruction_pool fun ++ [instr]
-        instr_idx = InstructionIdx $ length new_pool - 1
+        instruction_pool' = get_instruction_pool fun ++ [instr]
+        instr_idx = InstructionIdx $ length instruction_pool' - 1
 
         blocks = get_blocks fun
 

@@ -9,28 +9,31 @@ module IR.IRCtx
     , IsValue'
     , Value'
 
-    , ds_interner
-    , v_interner
+    , ds_pool
+    , v_pool
     , ds_child_list
     , v_child_list
-    , function_interner
+    , function_pool
 
     , DSIdx
     , upcast_dsidx
     , downcast_dsidx
-    , get_ds
+    , add_ds
+    , search_ds
     , resolve_dsidx
 
     , VIdx
     , upcast_vidx
     , downcast_vidx
-    , get_v
+    , add_v
+    , search_v
     , resolve_vidx
     ) where
 
 import SimpleLens
+import StateAndLens
 
-import Interner
+import Pool
 
 import IR.ChildList
 
@@ -50,72 +53,84 @@ type Value' = Value IRCtx (DSIdx Type)
 
 data IRCtx
     = IRCtx
-      { _ds_interner :: Interner DeclSymbol'
-      , _v_interner :: Interner Value'
-      , _ds_child_list :: ChildList (InternerIdx DeclSymbol') (InternerIdx DeclSymbol') String
-      , _v_child_list :: ChildList (InternerIdx DeclSymbol') (InternerIdx Value') String
-      , _function_interner :: Interner Function
+      { _ds_pool :: Pool DeclSymbol'
+      , _v_pool :: Pool Value'
+      , _ds_child_list :: ChildList (PoolIdx DeclSymbol') (PoolIdx DeclSymbol') String
+      , _v_child_list :: ChildList (PoolIdx DeclSymbol') (PoolIdx Value') String
+      , _function_pool :: Pool Function
       }
-ds_interner :: Lens IRCtx (Interner DeclSymbol')
-ds_interner = Lens _ds_interner (\ a b -> a { _ds_interner = b })
+ds_pool :: Lens IRCtx (Pool DeclSymbol')
+ds_pool = Lens _ds_pool (\ a b -> a { _ds_pool = b })
 
-v_interner :: Lens IRCtx (Interner Value')
-v_interner = Lens _v_interner (\ a b -> a { _v_interner = b })
+v_pool :: Lens IRCtx (Pool Value')
+v_pool = Lens _v_pool (\ a b -> a { _v_pool = b })
 
-ds_child_list :: Lens IRCtx (ChildList (InternerIdx DeclSymbol') (InternerIdx DeclSymbol') String)
+ds_child_list :: Lens IRCtx (ChildList (PoolIdx DeclSymbol') (PoolIdx DeclSymbol') String)
 ds_child_list = Lens _ds_child_list (\ a b -> a { _ds_child_list = b })
 
-v_child_list :: Lens IRCtx (ChildList (InternerIdx DeclSymbol') (InternerIdx Value') String)
+v_child_list :: Lens IRCtx (ChildList (PoolIdx DeclSymbol') (PoolIdx Value') String)
 v_child_list = Lens _v_child_list (\ a b -> a { _v_child_list = b })
 
-function_interner :: Lens IRCtx (Interner Function)
-function_interner = Lens _function_interner (\ a b -> a { _function_interner = b })
+function_pool :: Lens IRCtx (Pool Function)
+function_pool = Lens _function_pool (\ a b -> a { _function_pool = b })
 
-newtype DSIdx d = DSIdx { upcast_dsidx :: InternerIdx DeclSymbol' } deriving (Eq, Ord)
+newtype DSIdx d = DSIdx { upcast_dsidx :: PoolIdx DeclSymbol' } deriving (Eq, Ord)
 instance Show (DSIdx d) where
     show = show . upcast_dsidx
 
-downcast_dsidx :: IsDeclSymbol' d => InternerIdx DeclSymbol' -> Reader.Reader IRCtx (Maybe (DSIdx d))
+downcast_dsidx :: IsDeclSymbol' d => PoolIdx DeclSymbol' -> Reader.Reader IRCtx (Maybe (DSIdx d))
 downcast_dsidx idx = Reader.reader $ \ irctx ->
-    let ds = resolve_interner_idx idx (view ds_interner irctx)
+    let ds = get_from_pool idx (view ds_pool irctx)
 
         into_dsidx :: Maybe d -> Maybe (DSIdx d)
         into_dsidx d = DSIdx idx <$ d
 
     in into_dsidx (ds_cast ds)
 
-get_ds :: IsDeclSymbol' d => d -> State.State IRCtx (DSIdx d)
-get_ds d = State.state $ \ irctx ->
-    let (iidx, irctx') = modify ds_interner (get_from_interner (DeclSymbol d)) irctx
+add_ds :: IsDeclSymbol' d => d -> State.State IRCtx (DSIdx d)
+add_ds d = State.state $ \ irctx ->
+    let (iidx, irctx') = modify ds_pool (add_to_pool (DeclSymbol d)) irctx
     in (DSIdx iidx, irctx')
+
+search_ds :: IsDeclSymbol' d => d -> State.State IRCtx (DSIdx d)
+search_ds d =
+    search_in_pool (DeclSymbol d) <$> (view_s ds_pool) >>= \case
+        Just dsidx -> return (DSIdx dsidx)
+        Nothing -> add_ds d
 
 resolve_dsidx :: IsDeclSymbol' d => DSIdx d -> Reader.Reader IRCtx d
 resolve_dsidx (DSIdx iidx) = Reader.reader $ \ irctx ->
-    case ds_cast $ resolve_interner_idx iidx $ view ds_interner irctx of
+    case ds_cast $ get_from_pool iidx $ view ds_pool irctx of
         Just d -> d
         Nothing -> error "DSIdx does not have correct type"
 
 
-newtype VIdx v = VIdx { upcast_vidx :: InternerIdx Value' } deriving (Eq, Ord)
+newtype VIdx v = VIdx { upcast_vidx :: PoolIdx Value' } deriving (Eq, Ord)
 instance Show (VIdx d) where
     show = show . upcast_vidx
 
-downcast_vidx :: IsValue' v => InternerIdx Value' -> Reader.Reader IRCtx (Maybe (VIdx v))
+downcast_vidx :: IsValue' v => PoolIdx Value' -> Reader.Reader IRCtx (Maybe (VIdx v))
 downcast_vidx idx = Reader.reader $ \ irctx ->
-    let v = resolve_interner_idx idx (view v_interner irctx)
+    let v = get_from_pool idx (view v_pool irctx)
         
         into_vidx :: Maybe v -> Maybe (VIdx v)
         into_vidx v' = VIdx idx <$ v'
 
     in into_vidx (v_cast v)
 
-get_v :: IsValue' v => v -> State.State IRCtx (VIdx v)
-get_v v = State.state $ \ irctx ->
-    let (iidx, irctx') = modify v_interner (get_from_interner (Value v)) irctx
+add_v :: IsValue' v => v -> State.State IRCtx (VIdx v)
+add_v v = State.state $ \ irctx ->
+    let (iidx, irctx') = modify v_pool (add_to_pool (Value v)) irctx
     in (VIdx iidx, irctx')
+
+search_v :: IsValue' v => v -> State.State IRCtx (VIdx v)
+search_v v =
+    search_in_pool (Value v) <$> (view_s v_pool) >>= \case
+        Just vidx -> return (VIdx vidx)
+        Nothing -> add_v v
 
 resolve_vidx :: IsValue' v => VIdx v -> Reader.Reader IRCtx v
 resolve_vidx (VIdx iidx) = Reader.reader $ \ irctx ->
-    case v_cast $ resolve_interner_idx iidx $ view v_interner irctx of
+    case v_cast $ get_from_pool iidx $ view v_pool irctx of
         Just v -> v
         Nothing -> error "VIdx does not have correct type"

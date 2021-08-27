@@ -7,9 +7,9 @@ module IR
 
     , build_ir
 
-    , ds_interner
-    , v_interner
-    , function_interner
+    , ds_pool
+    , v_pool
+    , function_pool
 
     , DSIdx
     , VIdx
@@ -65,6 +65,7 @@ import qualified Message.Underlines as MsgUnds
 import Location
 
 import Interner
+import Pool
 import SimpleLens
 import StateAndLens
 import StateReader
@@ -84,10 +85,10 @@ irb_errors :: Lens IRBuilder [IRBuildError]
 irb_errors = Lens (\ (IRBuilder _ e) -> e) (\ (IRBuilder i _) e -> IRBuilder i e)
 -- IRBuildError {{{1
 data IRBuildError
-    = DuplicateValue String (InternerIdx Value') (InternerIdx Value')
+    = DuplicateValue String (PoolIdx Value') (PoolIdx Value')
     | DuplicateLocal Function Local LValue
     | Unimplemented String Span
-    | NotAType Span (InternerIdx DeclSymbol')
+    | NotAType Span (PoolIdx DeclSymbol')
     | PathDoesntExist Span -- TODO: change to 'no entity called x in y'
     | InvalidAssign Span Span
     | TypeError TypeError
@@ -121,8 +122,8 @@ instance Message.ToDiagnostic (IRBuildError, IRCtx) where
     to_diagnostic (DuplicateValue name old new, irctx) =
         Reader.runReader
             (
-                view_r v_interner >>= \ interner ->
-                duplicate_msg "value" "redecl-val" name (resolve_interner_idx old interner) (resolve_interner_idx new interner)
+                view_r v_pool >>= \ pool ->
+                duplicate_msg "value" "redecl-val" name (get_from_pool old pool) (get_from_pool new pool)
             )
             irctx
 
@@ -203,7 +204,7 @@ infixl 1 >>=<>
 add_error :: IRBuildError -> State.State IRBuilder ()
 add_error err = over_s irb_errors (++[err])
 
-resolve_path' :: [String] -> DSIdx Module -> State.State IRCtx (Maybe (InternerIdx DeclSymbol'))
+resolve_path' :: [String] -> DSIdx Module -> State.State IRCtx (Maybe (PoolIdx DeclSymbol'))
 resolve_path' segments root = resolve' segments (upcast_dsidx root)
     where
         resolve' [] start = return (Just start)
@@ -214,7 +215,7 @@ resolve_path' segments root = resolve' segments (upcast_dsidx root)
                 Just child -> resolve' next child
                 Nothing -> return Nothing
 
-resolve_path_d :: AST.LDPath -> DSIdx Module -> State.State IRBuilder (Maybe (InternerIdx DeclSymbol'))
+resolve_path_d :: AST.LDPath -> DSIdx Module -> State.State IRBuilder (Maybe (PoolIdx DeclSymbol'))
 resolve_path_d (Located path_sp (AST.DPath' located_segments)) root =
     let segments = map unlocate located_segments
     in modify_s' irb_irctx (resolve_path' segments root) >>= \case
@@ -223,7 +224,7 @@ resolve_path_d (Located path_sp (AST.DPath' located_segments)) root =
             add_error (PathDoesntExist path_sp) >>
             return Nothing
 
-resolve_path_v :: AST.LDPath -> DSIdx Module -> State.State IRBuilder (Maybe (InternerIdx Value'))
+resolve_path_v :: AST.LDPath -> DSIdx Module -> State.State IRBuilder (Maybe (PoolIdx Value'))
 resolve_path_v (Located path_sp (AST.DPath' located_segments)) root =
     let segments = map unlocate located_segments
         (first_segments, last_segment) = (init segments, last segments)
@@ -270,16 +271,16 @@ instance Lowerable AST.LSFunDecl p where
     vdeclare (Located fun_sp (AST.SFunDecl' mretty (Located _ name) params _)) root parent =
         case mretty of
             Just retty -> resolve_ty retty root
-            Nothing -> Just <$> modify_s' irb_irctx (get_ds UnitType)
+            Nothing -> Just <$> modify_s' irb_irctx (search_ds UnitType)
         >>=? return () $ \ retty' ->
         let make_param (Located sp (AST.DParam'Normal ty_ast _)) =
                 resolve_ty ty_ast root >>=? return Nothing $ \ ty ->
                 return $ Just (ty, sp)
         in sequence <$> mapM make_param params >>=? return () $ \ param_tys ->
         let fun = new_function retty' param_tys fun_sp
-        in modify_s (irb_irctx `join_lenses` function_interner) (get_from_interner fun) >>= \ fun_idx ->
+        in modify_s (irb_irctx `join_lenses` function_pool) (add_to_pool fun) >>= \ fun_idx ->
         modify_s' irb_irctx (new_function_pointer fun_idx) >>= \ fptr ->
-        upcast_vidx <$> modify_s' irb_irctx (get_v fptr) >>= \ fptr_val ->
+        upcast_vidx <$> modify_s' irb_irctx (add_v fptr) >>= \ fptr_val ->
         view_s (irb_irctx `join_lenses` v_child_list) >>= \ child_list ->
         case add_noreplace (upcast_dsidx parent) name fptr_val child_list of
             Left other_value ->
@@ -327,7 +328,7 @@ lower_fun_body :: AST.SFunDecl -> DSIdx Module -> VIdx ConstFunctionPointer -> S
 lower_fun_body (AST.SFunDecl' _ _ params body) root fptr_idx =
     to_state (read_r' irb_irctx $ resolve_vidx fptr_idx) >>= \ fptr ->
     let fun_idx = get_function_idx fptr
-    in resolve_interner_idx fun_idx <$> view_s (irb_irctx `join_lenses` function_interner) >>= \ fun ->
+    in get_from_pool fun_idx <$> view_s (irb_irctx `join_lenses` function_pool) >>= \ fun ->
     (if function_not_defined fun then return $ Just () else return Nothing) >>=? (return ()) $ \ _ ->
     let param_to_local (Located _ (AST.DParam'Normal _ (Located _ param_name))) reg_idx =
             let param_local = LVRegister reg_idx
@@ -346,7 +347,7 @@ lower_fun_body (AST.SFunDecl' _ _ params body) root fptr_idx =
         (_, FunctionCG irb' fun' _ _) = State.runState lower_action fcg
         fun'' = simplify_cfg fun'
     in State.put irb' >>
-    -- TODO: replace function in interner
+    -- TODO: replace function in pool
     _
 -- lowering things {{{3
 lower_body_expr :: AST.LSBlockExpr -> DSIdx Module -> State.State FunctionCG ()
