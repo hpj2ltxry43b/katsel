@@ -347,8 +347,7 @@ lower_fun_body (AST.SFunDecl' _ _ params body) root fptr_idx =
         (_, FunctionCG irb' fun' _ _) = State.runState lower_action fcg
         fun'' = simplify_cfg fun'
     in State.put irb' >>
-    -- TODO: replace function in pool
-    _
+    over_s (irb_irctx `join_lenses` function_pool) (replace_in_pool fun'' fun_idx)
 -- lowering things {{{3
 lower_body_expr :: AST.LSBlockExpr -> DSIdx Module -> State.State FunctionCG ()
 lower_body_expr body root = _
